@@ -1,4 +1,4 @@
-# Ballest Party Mode 0.4.0-beta.4
+# Ballest Party Mode 0.4.0-beta.5
 
 Public test beta for **2–4 players total, including the host**. Every player adds one object, everyone races a local copy
 of the same cumulative track, and the round ends with a named multi-ghost replay that reveals placements at the finish.
@@ -27,6 +27,9 @@ All participating players must use the same beta ZIP.
 - Checkpoints, starts/finishes, point lights and decals are excluded from the random object pool.
 - Previous objects remain on the track for later rounds. Falls and retries do not reset the race clock.
 - During building, the Party panel stays visible while the native editor camera remains free.
+- The build panel shows `W Move`, `E Rotate` and `R Scale` editor controls.
+- After the result hold, the host automatically starts the next build. A host-only **Next Round** button is available
+  as a fallback if a client replay does not report completion.
 - During a replay, every participant can select **Vote to Skip Replay**. The replay skips when everyone votes.
 
 ## Test status — players wanted

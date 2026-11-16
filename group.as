@@ -98,7 +98,15 @@ void GroupControl(const string &in from,array<string>@ p) {
     }
     if(p[0]=="DONE" && p.length()==3 && (phase==WATCHING || phase==REPLAY_LOADING)) {sender.done=true;return;}
     if(p[0]=="SKIP" && p.length()==3 && phase==WATCHING) {sender.skip=true;return;}
-    if(p[0]=="NEXT" && p.length()==4 && from==ownerId && !Hosting() && phase==WATCHING && ownDone && parseInt(p[3])==roundNumber+1) {nextRoundQueued=true;return;}
+    if(p[0]=="NEXT" && p.length()==4 && from==ownerId && !Hosting() && phase==WATCHING && parseInt(p[3])==roundNumber+1) {
+        nextRoundQueued=true;
+        if(!ownDone) {
+            forceReplayReveal=true;
+            if(!PartyStage::HoldReplay()) {NativeFail("Advancing from the replay");return;}
+            ownDone=true;Me().done=true;phaseSince=Host::Time()-RESULTS_HOLD_SECONDS;
+        }
+        return;
+    }
     Abort("Unexpected party phase message.");
 }
 void GroupOpenRace() {
@@ -110,6 +118,12 @@ void AdvanceParty()
 {
     if(roundNumber>=roundLimit) {Phase(PARTY_DONE);window.visible=true;Log::Info("PARTY configured rounds complete="+roundLimit);}
     else NewRound(roundNumber+1);
+}
+void HostAdvanceParty()
+{
+    if(!Hosting() || phase!=WATCHING || !ownDone || roundNumber>=roundLimit) return;
+    Enqueue("NEXT|"+session+"|"+roundNumber+"|"+(roundNumber+1));
+    AdvanceParty();
 }
 void GroupRound() {
     double now=Host::Time();
@@ -190,7 +204,7 @@ void GroupRound() {
             ownDone=true;Me().done=true;phaseSince=now;lastUi=-100;Enqueue("DONE|"+session+"|"+roundNumber);
             Log::Info("PARTY results hold started; lastFinish="+lastFinish+" seconds=5");
         }
-        if(Hosting() && All(4) && now-phaseSince>=RESULTS_HOLD_SECONDS && TransportIdle()) {Enqueue("NEXT|"+session+"|"+roundNumber+"|"+(roundNumber+1));AdvanceParty();}
+        if(Hosting() && ownDone && now-phaseSince>=RESULTS_HOLD_SECONDS && TransportIdle()) HostAdvanceParty();
         else if(!Hosting() && ownDone && nextRoundQueued && now-phaseSince>=RESULTS_HOLD_SECONDS) AdvanceParty();
         else if(clock<0 && now-phaseSince>10 && !ownDone) Abort("The replay stopped unexpectedly.");
         else if(ownDone && now-phaseSince>120) Abort("Not all participants completed the replay.");
@@ -221,6 +235,7 @@ void GroupUpdate() {
         if(!Hosting() || !Compatible()) Notice("A party needs 2–4 players with the same plugin version.");
         else {noticeUntil=0;string token=PartyStage::Digest(Together::LobbyId()+"|"+Host::Time()).substr(0,24);Enqueue("START|"+token+"|"+raceSeconds+"|"+Roster()+"|"+roundLimit+"|"+buildSeconds);Begin(token);}
     }
+    if(nextRound.Clicked() && Hosting() && phase==WATCHING && ownDone && roundNumber<roundLimit) HostAdvanceParty();
     if(phase==BUILD && !ownPlaced) {
         for(uint i=0;i<3;i++) if(choices[i].Clicked() && selected<0) {if(PartyStage::Choose(i)==0) NativeFail("Object selection");else selected=int(i);}
         if(commit.Clicked()) GroupSubmit();

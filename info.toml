@@ -1,6 +1,6 @@
 [meta]
 name = "Ballest Party Mode"
-version = "0.4.0-beta.4"
+version = "0.4.0-beta.5"
 author = "Ballest Party Mode project"
 description = "Build a track with 2–4 players, race against the clock, and reveal results in a shared replay."
 min_host = "0.34.13"

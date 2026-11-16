@@ -1,5 +1,5 @@
 // One party, repeated local races of the same cumulative PROTOTIP snapshot.
-const string VERSION = "0.4.0-beta.4";
+const string VERSION = "0.4.0-beta.5";
 const double RESULTS_HOLD_SECONDS = 5;
 const int MENU=0, BUILD_LOADING=1, BUILD=2, RACE_LOADING=3, COUNTDOWN=4, RACING=5, REPLAY_LOADING=6, WATCHING=7, STOPPED=8;
 const int SOLO_BOT_LOADING=9, SOLO_BOT_COUNTDOWN=10, SOLO_BOT_DRIVING=11, SOLO_DONE=12;
@@ -41,6 +41,8 @@ UI::Button@ start;
 UI::Button@ leave;
 UI::Button@ commit;
 UI::Button@ skipReplay;
+UI::Button@ nextRound;
+UI::Text@ buildLegend;
 array<UI::Button@> choices(3);
 array<UI::Image@> choiceIcons(3);
 int phase=MENU, roundNumber=0, selected=-1;
@@ -378,6 +380,8 @@ void Refresh()
     bool showCommit=phase==BUILD && selected>=0 && !ownPlaced;
     if (commit.visible!=showCommit) commit.visible=showCommit;
     skipReplay.visible=phase==WATCHING && !ownDone;
+    nextRound.visible=phase==WATCHING && ownDone && Hosting() && roundNumber<roundLimit;
+    buildLegend.visible=phase==BUILD;
     string help;
     if (phase==MENU) help=Compatible()?"Players connected. The host can start the party.":"Invite friends or enter an invite code. 2-4 players including the host.";
     else if (phase==BUILD) help="Move the camera freely while this panel stays visible. Move, rotate and scale your object, then select Lock in object.";
@@ -420,7 +424,7 @@ void Main()
     Log::Info("PARTY HF5: English UI; immediate DNF; five-second hold after last actual finish");
     Log::Info("PARTY HF6: updated base track; temporary map cleanup; solo hidden by default");
     Log::Info("PARTY HF7: stable UI focus/cursor; centered race timer; clearer object lock action");
-    Log::Info("PARTY beta.3 polish: always-free build camera; unanimous replay skip vote; lobby roster");
+    Log::Info("PARTY beta.5 hotfix: editor legend; host-authoritative automatic next round; manual Next Round fallback");
     @window=UI::CreateWindow(); window.SetAnchor(0.5f,0.08f); window.SetPivot(0.5f,0);
     window.SetBackground(0.035f,0.05f,0.075f,0.95f); window.SetPadding(20,16);
     @status=window.AddText("Ballest Party Mode",22); window.NewRow();
@@ -443,7 +447,8 @@ void Main()
     @code=window.AddTextInput(400,"BPM1: invite code"); code.clearOnSubmit=false; @joinButton=window.AddButton("Join Party"); window.NewRow();
     @start=window.AddButton("Start"); @leave=window.AddButton("End Party"); window.NewRow();
     for (uint i=0;i<3;i++) { @choiceIcons[i]=window.AddImage("",32,32); @choices[i]=window.AddButton("Object "+(i+1)); }
-    window.NewRow(); @commit=window.AddButton("Lock in object"); @skipReplay=window.AddButton("Vote to Skip Replay"); window.NewRow(); @result=window.AddText("",21);
+    window.NewRow(); @buildLegend=window.AddText("EDITOR CONTROLS   W  Move    E  Rotate    R  Scale",17); window.NewRow();
+    @commit=window.AddButton("Lock in object"); @skipReplay=window.AddButton("Vote to Skip Replay"); @nextRound=window.AddButton("Next Round"); window.NewRow(); @result=window.AddText("",21);
     @menu=UI::AddMenuButton("ballest party mode"); @footer=UI::AddFooterButton("party mode"); window.visible=false;
     @raceHud=UI::CreateWindow(); raceHud.SetAnchor(0.5f,0.095f); raceHud.SetPivot(0.5f,0); raceHud.SetOffset(0,0);
     raceHud.SetBackground(0.035f,0.05f,0.075f,0.85f); raceHud.SetPadding(14,10);
