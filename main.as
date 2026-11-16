@@ -1,5 +1,5 @@
 // One party, repeated local races of the same cumulative PROTOTIP snapshot.
-const string VERSION = "0.4.0-beta.3";
+const string VERSION = "0.4.0-beta.4";
 const double RESULTS_HOLD_SECONDS = 5;
 const int MENU=0, BUILD_LOADING=1, BUILD=2, RACE_LOADING=3, COUNTDOWN=4, RACING=5, REPLAY_LOADING=6, WATCHING=7, STOPPED=8;
 const int SOLO_BOT_LOADING=9, SOLO_BOT_COUNTDOWN=10, SOLO_BOT_DRIVING=11, SOLO_DONE=12;
@@ -40,7 +40,6 @@ UI::Button@ joinButton;
 UI::Button@ start;
 UI::Button@ leave;
 UI::Button@ commit;
-UI::Button@ freeCamera;
 UI::Button@ skipReplay;
 array<UI::Button@> choices(3);
 array<UI::Image@> choiceIcons(3);
@@ -378,11 +377,10 @@ void Refresh()
     }
     bool showCommit=phase==BUILD && selected>=0 && !ownPlaced;
     if (commit.visible!=showCommit) commit.visible=showCommit;
-    freeCamera.visible=phase==BUILD && !ownPlaced;
     skipReplay.visible=phase==WATCHING && !ownDone;
     string help;
     if (phase==MENU) help=Compatible()?"Players connected. The host can start the party.":"Invite friends or enter an invite code. 2-4 players including the host.";
-    else if (phase==BUILD) help="Move, rotate and scale your object, then select Lock in object. Use Free Camera to hide this panel; reopen it from party mode at the bottom.";
+    else if (phase==BUILD) help="Move the camera freely while this panel stays visible. Move, rotate and scale your object, then select Lock in object.";
     else if (phase==WATCHING && ownDone) help=((soloMode && roundNumber>=2) || (!soloMode && roundNumber>=roundLimit)?"Session complete in ":"Next round in ")+int(Math::ceil(Max(0.0,RESULTS_HOLD_SECONDS-(Host::Time()-phaseSince))))+" s.";
     else if (phase==WATCHING) {
         int votes=0;if(soloMode) votes=forceReplayReveal?1:0;else for(uint i=0;i<players.length();i++) if(players[i].skip) votes++;
@@ -410,7 +408,9 @@ void Refresh()
         status.SetWidth(600); detail.SetWidth(600); result.SetWidth(600);
     }
     appliedLayout=wantedLayout;
-    UI::SetCursorVisible(window.visible && phase!=RACING);
+    // The native editor already owns its cursor. Requesting another UI cursor
+    // changes input mode and locks its free camera, so leave it alone in BUILD.
+    UI::SetCursorVisible(window.visible && phase!=BUILD);
 }
 void Main()
 {
@@ -420,7 +420,7 @@ void Main()
     Log::Info("PARTY HF5: English UI; immediate DNF; five-second hold after last actual finish");
     Log::Info("PARTY HF6: updated base track; temporary map cleanup; solo hidden by default");
     Log::Info("PARTY HF7: stable UI focus/cursor; centered race timer; clearer object lock action");
-    Log::Info("PARTY beta.3 polish: build timer option; free-camera panel; faster replay transfer; unanimous replay skip; lobby roster");
+    Log::Info("PARTY beta.3 polish: always-free build camera; unanimous replay skip vote; lobby roster");
     @window=UI::CreateWindow(); window.SetAnchor(0.5f,0.08f); window.SetPivot(0.5f,0);
     window.SetBackground(0.035f,0.05f,0.075f,0.95f); window.SetPadding(20,16);
     @status=window.AddText("Ballest Party Mode",22); window.NewRow();
@@ -443,7 +443,7 @@ void Main()
     @code=window.AddTextInput(400,"BPM1: invite code"); code.clearOnSubmit=false; @joinButton=window.AddButton("Join Party"); window.NewRow();
     @start=window.AddButton("Start"); @leave=window.AddButton("End Party"); window.NewRow();
     for (uint i=0;i<3;i++) { @choiceIcons[i]=window.AddImage("",32,32); @choices[i]=window.AddButton("Object "+(i+1)); }
-    window.NewRow(); @commit=window.AddButton("Lock in object"); @freeCamera=window.AddButton("Free Camera (hide panel)"); @skipReplay=window.AddButton("Vote to Skip Replay"); window.NewRow(); @result=window.AddText("",21);
+    window.NewRow(); @commit=window.AddButton("Lock in object"); @skipReplay=window.AddButton("Vote to Skip Replay"); window.NewRow(); @result=window.AddText("",21);
     @menu=UI::AddMenuButton("ballest party mode"); @footer=UI::AddFooterButton("party mode"); window.visible=false;
     @raceHud=UI::CreateWindow(); raceHud.SetAnchor(0.5f,0.095f); raceHud.SetPivot(0.5f,0); raceHud.SetOffset(0,0);
     raceHud.SetBackground(0.035f,0.05f,0.075f,0.85f); raceHud.SetPadding(14,10);
@@ -482,7 +482,6 @@ void Update(float dt)
         for(uint i=0;i<3;i++) if(buildPresets[i].Clicked()) SetBuildDuration(i==0?30:i==1?60:120);
         if(buildApply.Clicked() || buildInput.Submitted()) ApplyBuildDuration();
     }
-    if (freeCamera.Clicked() && phase==BUILD) { window.visible=false; UI::SetCursorVisible(false); }
     if (skipReplay.Clicked() && phase==WATCHING && !ownDone)
     {
         if (soloMode) forceReplayReveal=true;
