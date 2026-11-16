@@ -1,0 +1,10 @@
+[meta]
+name = "Ballest Party Mode"
+version = "0.4.0-beta.2"
+author = "Ballest Party Mode project"
+description = "Build a track with 2–4 players, race against the clock, and reveal results in a shared replay."
+min_host = "0.34.13"
+
+[script]
+files = ["transport.as", "group.as", "main.as"]
+assets = ["maps/party_base.balledit"]
