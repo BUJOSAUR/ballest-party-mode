@@ -1,6 +1,6 @@
 class Participant {
     string id,name,piece,replay,readyHash;
-    bool placed=false,applied=false,ready=false,replayReady=false,done=false,revealed=false;
+    bool placed=false,applied=false,ready=false,replayReady=false,done=false,revealed=false,skip=false;
 }
 array<Participant@> players;
 string pendingMap;
@@ -15,6 +15,7 @@ bool All(int flag) {
         if(flag==2 && p.replay=="") return false;
         if(flag==3 && !p.replayReady) return false;
         if(flag==4 && !p.done) return false;
+        if(flag==5 && !p.skip) return false;
     }
     return true;
 }
@@ -51,7 +52,7 @@ void GroupNewRound() {
     pendingMap="";
     for(uint i=0;i<players.length();i++) {
         Participant@ p=players[i];p.piece="";p.replay="";p.readyHash="";
-        p.placed=false;p.applied=false;p.ready=false;p.replayReady=false;p.done=false;p.revealed=false;
+        p.placed=false;p.applied=false;p.ready=false;p.replayReady=false;p.done=false;p.revealed=false;p.skip=false;
     }
 }
 void GroupSubmit() {
@@ -83,8 +84,8 @@ void GroupBlob(const string &in from,const string &in kind,const string &in text
 void GroupControl(const string &in from,array<string>@ p) {
     if(p.length()==0 || phase==STOPPED) return;
     if(p[0]=="START") {
-        if(from!=Together::LobbyOwnerId() || Hosting() || sessionActive || !Compatible() || p.length()!=5 || p[3]!=Roster() || p[4].length()>3 || p[4].findFirstNotOf("0123456789")>=0 || parseInt(p[4])<1 || parseInt(p[4])>100 || p[2].length()>3 || p[2].findFirstNotOf("0123456789")>=0 || parseInt(p[2])<1 || parseInt(p[2])>600) {Abort("Invalid party start or roster.");return;}
-        raceSeconds=parseInt(p[2]);roundLimit=parseInt(p[4]);Begin(p[1]);return;
+        if(from!=Together::LobbyOwnerId() || Hosting() || sessionActive || !Compatible() || p.length()!=6 || p[3]!=Roster() || p[4].length()>3 || p[4].findFirstNotOf("0123456789")>=0 || parseInt(p[4])<1 || parseInt(p[4])>100 || p[2].length()>3 || p[2].findFirstNotOf("0123456789")>=0 || parseInt(p[2])<1 || parseInt(p[2])>600 || p[5].length()>3 || p[5].findFirstNotOf("0123456789")>=0 || parseInt(p[5])<10 || parseInt(p[5])>600) {Abort("Invalid party start or roster.");return;}
+        raceSeconds=parseInt(p[2]);roundLimit=parseInt(p[4]);buildSeconds=parseInt(p[5]);Begin(p[1]);return;
     }
     int at=Index(from);
     if(at<0 || !sessionActive || p.length()<3 || p[1]!=session || parseInt(p[2])!=roundNumber) {Abort("Party message belongs to another round.");return;}
@@ -96,6 +97,7 @@ void GroupControl(const string &in from,array<string>@ p) {
         if(!PartyStage::StartReplay()) NativeFail("Starting replay");else Phase(WATCHING);return;
     }
     if(p[0]=="DONE" && p.length()==3 && (phase==WATCHING || phase==REPLAY_LOADING)) {sender.done=true;return;}
+    if(p[0]=="SKIP" && p.length()==3 && phase==WATCHING) {sender.skip=true;return;}
     if(p[0]=="NEXT" && p.length()==4 && from==ownerId && !Hosting() && phase==WATCHING && ownDone && parseInt(p[3])==roundNumber+1) {nextRoundQueued=true;return;}
     Abort("Unexpected party phase message.");
 }
@@ -117,7 +119,7 @@ void GroupRound() {
             for(uint i=0;i<3 && i<offered.length();i++) choices[i].label=offered[i];
             for(uint i=0;i<3 && i<icons.length();i++) choiceIcons[i].path=icons[i];
             if(offered.length()==3) Log::Info("PARTY offers="+offered[0]+"|"+offered[1]+"|"+offered[2]);
-            buildDeadline=now+20;Phase(BUILD);
+            buildDeadline=now+buildSeconds;Phase(BUILD);
         } else if(now-phaseSince>60) NativeFail("Loading build phase");
     }
     if(phase==BUILD) {
@@ -131,7 +133,7 @@ void GroupRound() {
             mapHash=PartyStage::Digest(pendingMap);pendingMap="";
             if(!PartyStage::OpenRace(roundNumber)) {NativeFail("Loading race");return;}Phase(RACE_LOADING);
         }
-        else if(now-phaseSince>120) Abort("Not all participants placed their objects.");
+        else if(now-phaseSince>buildSeconds+60) Abort("Not all participants placed their objects.");
     }
     if(phase==RACE_LOADING) {
         if(!Me().ready && PartyStage::RaceReady()) {Me().ready=true;Me().readyHash=mapHash;Enqueue("READY|"+session+"|"+roundNumber+"|"+mapHash);}
@@ -171,7 +173,7 @@ void GroupRound() {
         for(uint i=0;i<players.length();i++) {
             bool finished=PartyStage::ReplayFinished(int(i));double time=PartyStage::FinishTime(int(i));
             if(finished) lastFinish=Max(lastFinish,time);
-            if(!finished || clock>=time) {
+            if(forceReplayReveal || !finished || clock>=time) {
                 int rank=1;bool tie=false;
                 for(uint j=0;j<players.length();j++) if(j!=i && PartyStage::ReplayFinished(int(j))) {
                     double other=PartyStage::FinishTime(int(j));if(other<time-0.0005) rank++;else if(Math::abs(other-time)<0.0005) tie=true;
@@ -182,7 +184,8 @@ void GroupRound() {
             }
         }
         result.text=shown;
-        if(!ownDone && clock>=lastFinish) {
+        if(!ownDone && (forceReplayReveal || All(5) || clock>=lastFinish)) {
+            forceReplayReveal=forceReplayReveal || All(5);
             if(!PartyStage::HoldReplay()) {NativeFail("Holding results");return;}
             ownDone=true;Me().done=true;phaseSince=now;lastUi=-100;Enqueue("DONE|"+session+"|"+roundNumber);
             Log::Info("PARTY results hold started; lastFinish="+lastFinish+" seconds=5");
@@ -203,19 +206,20 @@ void GroupUpdate() {
     if(current!=lobbyId) {
         if(sessionActive) {Abort("The party lobby closed.");return;}
         lobbyId=current;ResetTransport();players.resize(0);lastHello=-100;
-        if(current!="" && Hosting()) {Together::SetLobbyData("ballest_party",VERSION);Together::SetLobbyData("party_race_seconds",""+raceSeconds);Together::SetLobbyData("party_rounds",""+roundLimit);}
+        if(current!="" && Hosting()) {Together::SetLobbyData("ballest_party",VERSION);Together::SetLobbyData("party_race_seconds",""+raceSeconds);Together::SetLobbyData("party_rounds",""+roundLimit);Together::SetLobbyData("party_build_seconds",""+buildSeconds);}
     }
     SyncParticipants();if(phase==STOPPED) return;
     if(current!="" && !Hosting() && !sessionActive) {
         string count=Together::LobbyData("party_rounds");
         if(count.length()>0 && count.length()<=3 && count.findFirstNotOf("0123456789")<0 && parseInt(count)>=1 && parseInt(count)<=100) roundLimit=parseInt(count);
         string shared=Together::LobbyData("party_race_seconds");if(shared.length()>0 && shared.length()<=3 && shared.findFirstNotOf("0123456789")<0 && parseInt(shared)>=1 && parseInt(shared)<=600) raceSeconds=parseInt(shared);
+        string build=Together::LobbyData("party_build_seconds");if(build.length()>0 && build.length()<=3 && build.findFirstNotOf("0123456789")<0 && parseInt(build)>=10 && parseInt(build)<=600) buildSeconds=parseInt(build);
     }
     if(current!="" && Host::Time()-lastHello>3) {Together::SendPluginMessage("H7|"+VERSION);lastHello=Host::Time();}
     ReceiveTransport();
     if(start.Clicked()) {
         if(!Hosting() || !Compatible()) Notice("A party needs 2–4 players with the same plugin version.");
-        else {noticeUntil=0;string token=PartyStage::Digest(Together::LobbyId()+"|"+Host::Time()).substr(0,24);Enqueue("START|"+token+"|"+raceSeconds+"|"+Roster()+"|"+roundLimit);Begin(token);}
+        else {noticeUntil=0;string token=PartyStage::Digest(Together::LobbyId()+"|"+Host::Time()).substr(0,24);Enqueue("START|"+token+"|"+raceSeconds+"|"+Roster()+"|"+roundLimit+"|"+buildSeconds);Begin(token);}
     }
     if(phase==BUILD && !ownPlaced) {
         for(uint i=0;i<3;i++) if(choices[i].Clicked() && selected<0) {if(PartyStage::Choose(i)==0) NativeFail("Object selection");else selected=int(i);}

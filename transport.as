@@ -72,7 +72,9 @@ void PumpTransport() {
     for(uint i=0;i<links.length();i++) {
         PartyLink@ link=links[i];if(link.queue.length()==0) continue;
         if(link.outstanding>=0 && now-link.outstanding>90) {Abort("A participant stopped responding.");return;}
-        if(now-link.sent<0.1) continue;
+        // Steam lobby messages are reliable here. Keep one packet in flight,
+        // but do not add a tenth-of-a-second delay to every replay chunk.
+        if(now-link.sent<0.03) continue;
         if(Together::SendPluginMessage("D7|"+link.id+"|"+link.tx+"|"+link.queue[0])) {link.sent=now;if(link.outstanding<0) link.outstanding=now;}
     }
 }

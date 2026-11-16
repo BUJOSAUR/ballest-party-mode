@@ -1,14 +1,19 @@
 // One party, repeated local races of the same cumulative PROTOTIP snapshot.
-const string VERSION = "0.4.0-beta.2";
+const string VERSION = "0.4.0-beta.3";
 const double RESULTS_HOLD_SECONDS = 5;
 const int MENU=0, BUILD_LOADING=1, BUILD=2, RACE_LOADING=3, COUNTDOWN=4, RACING=5, REPLAY_LOADING=6, WATCHING=7, STOPPED=8;
 const int SOLO_BOT_LOADING=9, SOLO_BOT_COUNTDOWN=10, SOLO_BOT_DRIVING=11, SOLO_DONE=12;
 const int PARTY_DONE=13;
 int roundLimit=10;
+int buildSeconds=60;
 UI::Text@ roundsLabel;
 UI::TextInput@ roundsInput;
 UI::Button@ roundsApply;
 array<UI::Button@> roundsPresets(3);
+UI::Text@ buildLabel;
+UI::TextInput@ buildInput;
+UI::Button@ buildApply;
+array<UI::Button@> buildPresets(3);
 bool soloMode=false;
 [Setting hidden]
 bool AllowPrivateSolo=false;
@@ -35,6 +40,8 @@ UI::Button@ joinButton;
 UI::Button@ start;
 UI::Button@ leave;
 UI::Button@ commit;
+UI::Button@ freeCamera;
+UI::Button@ skipReplay;
 array<UI::Button@> choices(3);
 array<UI::Image@> choiceIcons(3);
 int phase=MENU, roundNumber=0, selected=-1;
@@ -48,6 +55,7 @@ bool ownReplayReady=false, otherReplayReady=false, ownDone=false, otherDone=fals
 bool hostRevealed=false, guestRevealed=false;
 bool nextRoundQueued=false;
 bool ownTimedOut=false;
+bool forceReplayReveal=false;
 int appliedLayout=-1;
 double phaseSince=0, buildDeadline=0, countdownAt=0, lastHello=-100, peerSeen=-100, lastUi=-100, leftSince=-1, inactiveSince=-1;
 double missingFinishSince=-1;
@@ -68,6 +76,19 @@ void SetRounds(int count)
     if (count<1 || count>100) { Notice("Enter a whole number from 1 to 100 rounds."); return; }
     roundLimit=count; roundsInput.value=""+count;
     if (Hosting()) Together::SetLobbyData("party_rounds",""+count);
+}
+void SetBuildDuration(int seconds)
+{
+    if (!CanSetDuration()) return;
+    if (seconds<10 || seconds>600) { Notice("Enter a whole number from 10 to 600 seconds."); return; }
+    buildSeconds=seconds; buildInput.value=""+seconds;
+    if (Hosting()) Together::SetLobbyData("party_build_seconds",""+seconds);
+}
+void ApplyBuildDuration()
+{
+    string text=buildInput.typed;
+    if (text=="" || text.length()>3 || text.findFirstNotOf("0123456789")>=0) { Notice("Enter a whole number from 10 to 600 seconds."); return; }
+    SetBuildDuration(parseInt(text));
 }
 void ApplyRounds()
 {
@@ -114,6 +135,7 @@ void NewRound(int number)
     ownDone=false; otherDone=false; ownReplay=""; otherReplay="";
     nextRoundQueued=false;
     ownTimedOut=false;
+    forceReplayReveal=false;
     hostRevealed=false; guestRevealed=false;
     missingFinishSince=-1;
     mapHash=""; result.text=number>1 && previous!="" ? "Previous round "+previousRound+":\n"+previous : "";
@@ -176,7 +198,7 @@ void UpdateRound()
             for (uint i=0;i<3 && i<offered.length();i++) choices[i].label=offered[i];
             for (uint i=0;i<3 && i<icons.length();i++) choiceIcons[i].path=icons[i];
             if (offered.length()==3) Log::Info("PARTY offers="+offered[0]+"|"+offered[1]+"|"+offered[2]);
-            buildDeadline=now+20; Phase(BUILD);
+            buildDeadline=now+buildSeconds; Phase(BUILD);
         }
         else if (now-phaseSince>60) NativeFail("The build phase took too long to load");
     }
@@ -260,13 +282,13 @@ void UpdateRound()
         string shown="";
         bool tie=Math::abs(a-b)<0.0005;
         bool aFinished=PartyStage::ReplayFinished(0), bFinished=PartyStage::ReplayFinished(1);
-        if ((!aFinished || clock>=a) && !hostRevealed) { hostRevealed=true; Log::Info("PARTY reveal host playback="+clock+" finish="+a+" reachedGoal="+(aFinished?"true":"false")); }
-        if ((!bFinished || clock>=b) && !guestRevealed) { guestRevealed=true; Log::Info("PARTY reveal guest playback="+clock+" finish="+b+" reachedGoal="+(bFinished?"true":"false")); }
-        if (!aFinished || clock>=a) shown+=hostName+(aFinished?" - "+(!bFinished || tie || a<=b?"1st":"2nd")+"  "+formatFloat(a,"",0,3)+" s"+(tie && bFinished?" (tie)":""):" - DNF")+"\n";
-        if (!bFinished || clock>=b) shown+=guestName+(bFinished?" - "+(!aFinished || tie || b<=a?"1st":"2nd")+"  "+formatFloat(b,"",0,3)+" s"+(tie && aFinished?" (tie)":""):" - DNF");
+        if ((forceReplayReveal || !aFinished || clock>=a) && !hostRevealed) { hostRevealed=true; Log::Info("PARTY reveal host playback="+clock+" finish="+a+" reachedGoal="+(aFinished?"true":"false")); }
+        if ((forceReplayReveal || !bFinished || clock>=b) && !guestRevealed) { guestRevealed=true; Log::Info("PARTY reveal guest playback="+clock+" finish="+b+" reachedGoal="+(bFinished?"true":"false")); }
+        if (forceReplayReveal || !aFinished || clock>=a) shown+=hostName+(aFinished?" - "+(!bFinished || tie || a<=b?"1st":"2nd")+"  "+formatFloat(a,"",0,3)+" s"+(tie && bFinished?" (tie)":""):" - DNF")+"\n";
+        if (forceReplayReveal || !bFinished || clock>=b) shown+=guestName+(bFinished?" - "+(!aFinished || tie || b<=a?"1st":"2nd")+"  "+formatFloat(b,"",0,3)+" s"+(tie && aFinished?" (tie)":""):" - DNF");
         result.text=shown;
         double lastFinish=Max(aFinished?a:0.0,bFinished?b:0.0);
-        if (!ownDone && clock>=lastFinish)
+        if (!ownDone && (forceReplayReveal || clock>=lastFinish))
         {
             if (!PartyStage::HoldReplay()) { NativeFail("Replay results"); return; }
             ownDone=true; if (!soloMode) Enqueue("DONE|"+session+"|"+roundNumber); phaseSince=now; lastUi=-100;
@@ -308,10 +330,18 @@ void Refresh()
     roundsLabel.visible=phase==MENU;
     roundsInput.visible=CanSetDuration(); roundsApply.visible=CanSetDuration();
     for(uint i=0;i<3;i++) roundsPresets[i].visible=CanSetDuration();
+    buildLabel.text="Build duration: "+buildSeconds+" s"+(CanSetDuration()?" (10-600 s)":"");
+    buildLabel.visible=phase==MENU;
+    buildInput.visible=CanSetDuration(); buildApply.visible=CanSetDuration();
+    for(uint i=0;i<3;i++) buildPresets[i].visible=CanSetDuration();
     string text="Ballest Party Mode\n";
     if (phase==MENU) {
         text+=Together::LobbyState()=="in lobby" ? "Party: "+players.length()+"/4 players (2 required)" : "Create a party or join friends.";
-        if (Together::LobbyState()=="in lobby") for(uint i=0;i<players.length();i++) text+="\n"+players[i].name;
+        if (Together::LobbyState()=="in lobby") for(uint i=0;i<players.length();i++) {
+            PartyLink@ link=players[i].id==Together::OwnId()?null:Link(players[i].id);
+            bool connected=players[i].id==Together::OwnId() || (link !is null && link.version==VERSION && Host::Time()-link.seen<=15);
+            text+="\n"+(i==0?"HOST  ":"PLAYER  ")+players[i].name+(players[i].id==Together::OwnId()?" (you)":"")+(connected?" - ready":" - connecting");
+        }
     }
     if (phase==BUILD_LOADING) text+="Loading PROTOTIP - Round "+roundNumber+"/"+(soloMode?2:roundLimit);
     if (phase==BUILD) text+="Round "+roundNumber+"/"+roundLimit+" - "+(ownPlaced?"Waiting for all participants":"Choose and place one object: "+int(Math::ceil(Max(0.0,buildDeadline-Host::Time())))+" s");
@@ -348,11 +378,16 @@ void Refresh()
     }
     bool showCommit=phase==BUILD && selected>=0 && !ownPlaced;
     if (commit.visible!=showCommit) commit.visible=showCommit;
+    freeCamera.visible=phase==BUILD && !ownPlaced;
+    skipReplay.visible=phase==WATCHING && !ownDone;
     string help;
     if (phase==MENU) help=Compatible()?"Players connected. The host can start the party.":"Invite friends or enter an invite code. 2-4 players including the host.";
-    else if (phase==BUILD) help="Move and rotate your object, then select Lock in object. Objects stay for the next round.";
+    else if (phase==BUILD) help="Move, rotate and scale your object, then select Lock in object. Use Free Camera to hide this panel; reopen it from party mode at the bottom.";
     else if (phase==WATCHING && ownDone) help=((soloMode && roundNumber>=2) || (!soloMode && roundNumber>=roundLimit)?"Session complete in ":"Next round in ")+int(Math::ceil(Max(0.0,RESULTS_HOLD_SECONDS-(Host::Time()-phaseSince))))+" s.";
-    else if (phase==WATCHING) help="Placings appear as each ghost crosses the finish.";
+    else if (phase==WATCHING) {
+        int votes=0;if(soloMode) votes=forceReplayReveal?1:0;else for(uint i=0;i<players.length();i++) if(players[i].skip) votes++;
+        help="Placings appear as each ghost crosses the finish. Skip replay: "+votes+"/"+(soloMode?1:players.length())+" votes.";
+    }
     else if (phase==PARTY_DONE) help="Final round results. Select End Party to return to the main menu.";
     else if (phase==SOLO_DONE) help="Two rounds completed. Select End Party to return to the main menu.";
     else if (phase==RACING && ownReplay=="") help="Retry as often as you need. Your clock keeps running.";
@@ -385,6 +420,7 @@ void Main()
     Log::Info("PARTY HF5: English UI; immediate DNF; five-second hold after last actual finish");
     Log::Info("PARTY HF6: updated base track; temporary map cleanup; solo hidden by default");
     Log::Info("PARTY HF7: stable UI focus/cursor; centered race timer; clearer object lock action");
+    Log::Info("PARTY beta.3 polish: build timer option; free-camera panel; faster replay transfer; unanimous replay skip; lobby roster");
     @window=UI::CreateWindow(); window.SetAnchor(0.5f,0.08f); window.SetPivot(0.5f,0);
     window.SetBackground(0.035f,0.05f,0.075f,0.95f); window.SetPadding(20,16);
     @status=window.AddText("Ballest Party Mode",22); window.NewRow();
@@ -400,10 +436,14 @@ void Main()
     @roundsPresets[0]=window.AddButton("5 rounds"); @roundsPresets[1]=window.AddButton("10 rounds"); @roundsPresets[2]=window.AddButton("20 rounds");
     @roundsInput=window.AddTextInput(100,"Rounds"); roundsInput.clearOnSubmit=false; roundsInput.value="10";
     @roundsApply=window.AddButton("Set Rounds"); window.NewRow();
+    @buildLabel=window.AddText("Build duration: 60 s",17); window.NewRow();
+    @buildPresets[0]=window.AddButton("30 s"); @buildPresets[1]=window.AddButton("60 s"); @buildPresets[2]=window.AddButton("120 s");
+    @buildInput=window.AddTextInput(100,"Seconds"); buildInput.clearOnSubmit=false; buildInput.value="60";
+    @buildApply=window.AddButton("Set Build Time"); window.NewRow();
     @code=window.AddTextInput(400,"BPM1: invite code"); code.clearOnSubmit=false; @joinButton=window.AddButton("Join Party"); window.NewRow();
     @start=window.AddButton("Start"); @leave=window.AddButton("End Party"); window.NewRow();
     for (uint i=0;i<3;i++) { @choiceIcons[i]=window.AddImage("",32,32); @choices[i]=window.AddButton("Object "+(i+1)); }
-    window.NewRow(); @commit=window.AddButton("Lock in object"); window.NewRow(); @result=window.AddText("",21);
+    window.NewRow(); @commit=window.AddButton("Lock in object"); @freeCamera=window.AddButton("Free Camera (hide panel)"); @skipReplay=window.AddButton("Vote to Skip Replay"); window.NewRow(); @result=window.AddText("",21);
     @menu=UI::AddMenuButton("ballest party mode"); @footer=UI::AddFooterButton("party mode"); window.visible=false;
     @raceHud=UI::CreateWindow(); raceHud.SetAnchor(0.5f,0.095f); raceHud.SetPivot(0.5f,0); raceHud.SetOffset(0,0);
     raceHud.SetBackground(0.035f,0.05f,0.075f,0.85f); raceHud.SetPadding(14,10);
@@ -439,6 +479,14 @@ void Update(float dt)
         if (durationApply.Clicked() || durationInput.Submitted()) ApplyDuration();
         for(uint i=0;i<3;i++) if(roundsPresets[i].Clicked()) SetRounds(i==0?5:i==1?10:20);
         if(roundsApply.Clicked() || roundsInput.Submitted()) ApplyRounds();
+        for(uint i=0;i<3;i++) if(buildPresets[i].Clicked()) SetBuildDuration(i==0?30:i==1?60:120);
+        if(buildApply.Clicked() || buildInput.Submitted()) ApplyBuildDuration();
+    }
+    if (freeCamera.Clicked() && phase==BUILD) { window.visible=false; UI::SetCursorVisible(false); }
+    if (skipReplay.Clicked() && phase==WATCHING && !ownDone)
+    {
+        if (soloMode) forceReplayReveal=true;
+        else { Participant@ mine=Me(); if (mine !is null && !mine.skip) { mine.skip=true; Enqueue("SKIP|"+session+"|"+roundNumber); } }
     }
     if (leave.Clicked())
     {
